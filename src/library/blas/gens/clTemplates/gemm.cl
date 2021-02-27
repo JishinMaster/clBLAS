@@ -585,6 +585,11 @@ __kernel void GEMM_NT__KERNEL ( __global %TYPE const * restrict _A, __global %TY
     __global %TYPE const *restrict A;
     __global %TYPE const *restrict B;
     __global %TYPE *C = _C + offc;
+    
+      A += (get_global_id(2) * M*K);
+      B += (get_global_id(2) * K*N);
+      C += (get_global_id(2) * M*N);
+      
     uint K = _K;
     uint lda, ldb;
     uint rowA, colA, rowB, colB, rowC, colC;

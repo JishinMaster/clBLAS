@@ -35,7 +35,11 @@ dgemmBlockTempLocalPrefetch(__global double2 const * restrict A,
 
     lda /= 2;
     ldb /= 2;
-    
+
+      A += (get_global_id(2) * M*K);
+      B += (get_global_id(2) * K*N);
+      C += (get_global_id(2) * M*N);
+  
     int get_group_id_1;
     int get_global_id_1;
     A += (int)get_global_id(0);

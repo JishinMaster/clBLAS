@@ -27,39 +27,65 @@
 /* This example uses predefined matrices and their characteristics for
  * simplicity purpose.
  */
+
+#define M  32
+#define N  64
+#define K  128
+
+#define batch 4
+
 static const clblasOrder order = clblasRowMajor;
-static const clblasSide side = clblasLeft;
 
-static const size_t M = 4;
-static const size_t N = 5;
-
-static const FloatComplex alpha = { 10, 0 };
+static const cl_float alpha = 10;
 
 static const clblasTranspose transA = clblasNoTrans;
-static const clblasUplo uploA = clblasUpper;
-static const clblasDiag diagA = clblasNonUnit;
-static const FloatComplex A[] = {
-    { 11, 0 },{ 12, 0 },{ 13, 0 },{ 14, 0 },
-    { 0, 0 },{ 22, 0 },{ 23, 0 },{ 24, 0 },
-    { 0, 0 },{ 0, 0 },{ 33, 0 },{ 34, 0 },
-    { 0, 0 },{ 0, 0 },{ 0, 0 },{ 44, 0 }
+static const cl_float A[M*K*batch] = {
+    11, 12, 13, 14, 15,
+    21, 22, 23, 24, 25,
+    31, 32, 33, 34, 35,
+    41, 42, 43, 44, 45,
+    17, 18, 19, 14, 15,
+    21, 22, 23, 24, 25,
+    31, 32, 33, 34, 35,
+    41, 42, 43, 44, 45,
 };
-static const size_t lda = 4;        /* i.e. lda = M */
+static const size_t lda = K;        /* i.e. lda = K */
 
-static FloatComplex B[] = {
-    { 11, 0 },{ 12, 0 },{ 13, 0 },{ 14, 0 },{ 15, 0 },
-    { 21, 0 },{ 22, 0 },{ 23, 0 },{ 24, 0 },{ 25, 0 },
-    { 31, 0 },{ 32, 0 },{ 33, 0 },{ 34, 0 },{ 35, 0 },
-    { 41, 0 },{ 42, 0 },{ 43, 0 },{ 44, 0 },{ 45, 0 },
+static const clblasTranspose transB = clblasNoTrans;
+static const cl_float B[K*N*batch] = {
+    11, 12, 13,
+    21, 22, 23,
+    31, 32, 33,
+    41, 42, 43,
+    51, 52, 53,
+    1, 2, 3,
+    21, 22, 23,
+    31, 32, 33,
+    41, 42, 43,
+    51, 52, 53,
 };
-static const size_t ldb = 5;        /* i.e. ldb = N */
+static const size_t ldb = N;        /* i.e. ldb = N */
 
+static const cl_float beta = 20;
 
-static FloatComplex result[20];         /* ldb*M */
+static cl_float C[M*N*batch] = {
+    11, 12, 13,
+    21, 22, 23,
+    31, 32, 33,
+    41, 42, 43,
+    4, 5, 6,
+    21, 22, 23,
+    31, 32, 33,
+    41, 42, 43,
+};
+static const size_t ldc = N;        /* i.e. ldc = N */
+
+static cl_float result[M*N*batch];
 
 static const size_t off  = 1;
-static const size_t offA = 4 + 1;   /* M + off */
-static const size_t offB = 5 + 1;   /* N + off */
+static const size_t offA = K + 1;   /* K + off */
+static const size_t offB = N + 1;   /* N + off */
+static const size_t offC = N + 1;   /* N + off */
 
 static void
 printResult(const char* str)
@@ -68,10 +94,10 @@ printResult(const char* str)
 
     printf("%s:\n", str);
 
-    nrows = (sizeof(result) / sizeof(FloatComplex)) / ldb;
+    nrows = (sizeof(result) / sizeof(cl_float)) / ldc;
     for (i = 0; i < nrows; i++) {
-        for (j = 0; j < ldb; j++) {
-            printf("%.5f ", result[i * ldb + j].s[0]);
+        for (j = 0; j < ldc; j++) {
+            printf("%d ", (int)result[i * ldc + j]);
         }
         printf("\n");
     }
@@ -81,23 +107,23 @@ int
 main(void)
 {
     cl_int err;
-    cl_platform_id platform[] = { 0, 0 };
+    cl_platform_id platform = 0;
     cl_device_id device = 0;
     cl_context_properties props[3] = { CL_CONTEXT_PLATFORM, 0, 0 };
     cl_context ctx = 0;
     cl_command_queue queue = 0;
-    cl_mem bufA, bufB;
+    cl_mem bufA, bufB, bufC;
     cl_event event = NULL;
     int ret = 0;
 
     /* Setup OpenCL environment. */
-    err = clGetPlatformIDs(sizeof( platform ), &platform, NULL);
+    err = clGetPlatformIDs(1, &platform, NULL);
     if (err != CL_SUCCESS) {
         printf( "clGetPlatformIDs() failed with %d\n", err );
         return 1;
     }
 
-    err = clGetDeviceIDs(platform[0], CL_DEVICE_TYPE_CPU, 1, &device, NULL);
+    err = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, NULL);
     if (err != CL_SUCCESS) {
         printf( "clGetDeviceIDs() failed with %d\n", err );
         return 1;
@@ -127,22 +153,28 @@ main(void)
     }
 
     /* Prepare OpenCL memory objects and place matrices inside them. */
-    bufA = clCreateBuffer(ctx, CL_MEM_READ_ONLY, M * M * sizeof(*A),
+    bufA = clCreateBuffer(ctx, CL_MEM_READ_ONLY, M * K * batch* sizeof(*A),
                           NULL, &err);
-    bufB = clCreateBuffer(ctx, CL_MEM_READ_WRITE, M * N * sizeof(*B),
+    bufB = clCreateBuffer(ctx, CL_MEM_READ_ONLY, K * N * batch *sizeof(*B),
+                          NULL, &err);
+    bufC = clCreateBuffer(ctx, CL_MEM_READ_WRITE, M * N * batch* sizeof(*C),
                           NULL, &err);
 
     err = clEnqueueWriteBuffer(queue, bufA, CL_TRUE, 0,
-        M * M * sizeof(*A), A, 0, NULL, NULL);
+        M * K * batch *sizeof(*A), A, 0, NULL, NULL);
     err = clEnqueueWriteBuffer(queue, bufB, CL_TRUE, 0,
-        M * N * sizeof(*B), B, 0, NULL, NULL);
+        K * N * batch*sizeof(*B), B, 0, NULL, NULL);
+    err = clEnqueueWriteBuffer(queue, bufC, CL_TRUE, 0,
+        M * N * batch*sizeof(*C), C, 0, NULL, NULL);
 
-    /* Call clblas function. Perform TRSM for the lower right sub-matrices */
-    err = clblasCtrsm(order, side, uploA, transA, diagA, M - off, N - off,
-                         alpha, bufA, offA, lda, bufB, offB, ldb, 1, &queue, 0,
-                         NULL, &event);
+    /* Call clblas extended function. Perform gemm for the lower right sub-matrices */
+    err = clblasSgemmBatch(order, transA, transB, M - off, N - off, K - off,
+                         alpha, bufA, offA, lda,
+                         bufB, offB, ldb, beta,
+                         bufC, offC, ldc,
+                         1, &queue, 0, NULL, &event, batch);
     if (err != CL_SUCCESS) {
-        printf("clblasStrsmEx() failed with %d\n", err);
+        printf("clblasSgemmEx() failed with %d\n", err);
         ret = 1;
     }
     else {
@@ -150,19 +182,20 @@ main(void)
         err = clWaitForEvents(1, &event);
 
         /* Fetch results of calculations from GPU memory. */
-        err = clEnqueueReadBuffer(queue, bufB, CL_TRUE, 0,
-                                  M * N * sizeof(*result),
+        err = clEnqueueReadBuffer(queue, bufC, CL_TRUE, 0,
+                                  M * N * 2 *sizeof(*result),
                                   result, 0, NULL, NULL);
 
-        /* At this point you will get the result of STRSM placed in 'result' array. */
+        /* At this point you will get the result of SGEMM placed in 'result' array. */
         puts("");
-        printResult("clblasCtrsmEx result");
+        printResult("clblasSgemmEx result");
     }
 
     /* Release OpenCL events. */
     clReleaseEvent(event);
 
     /* Release OpenCL memory objects. */
+    clReleaseMemObject(bufC);
     clReleaseMemObject(bufB);
     clReleaseMemObject(bufA);
 

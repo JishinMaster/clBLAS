@@ -7404,6 +7404,91 @@ clblasSgemm(
     const cl_event *eventWaitList,
     cl_event *events);
 
+
+/**
+ * @brief Matrix-matrix product of general rectangular matrices with float
+ *        elements. Extended version.
+ *
+ * Matrix-matrix products:
+ *   - \f$ C \leftarrow \alpha A B + \beta C \f$
+ *   - \f$ C \leftarrow \alpha A^T B + \beta C \f$
+ *   - \f$ C \leftarrow \alpha A B^T + \beta C \f$
+ *   - \f$ C \leftarrow \alpha A^T B^T + \beta C \f$
+ *
+ * @param[in] order     Row/column order.
+ * @param[in] transA    How matrix \b A is to be transposed.
+ * @param[in] transB    How matrix \b B is to be transposed.
+ * @param[in] M         Number of rows in matrix \b A.
+ * @param[in] N         Number of columns in matrix \b B.
+ * @param[in] K         Number of columns in matrix \b A and rows in matrix \b B.
+ * @param[in] alpha     The factor of matrix \b A.
+ * @param[in] A         Buffer object storing matrix \b A.
+ * @param[in] offA      Offset of the first element of the matrix \b A in the
+ *                      buffer object. Counted in elements.
+ * @param[in] lda       Leading dimension of matrix \b A. It cannot be less
+ *                      than \b K when the \b order parameter is set to
+ *                      \b clblasRowMajor,\n or less than \b M when the
+ *                      parameter is set to \b clblasColumnMajor.
+ * @param[in] B         Buffer object storing matrix \b B.
+ * @param[in] offB      Offset of the first element of the matrix \b B in the
+ *                      buffer object. Counted in elements.
+ * @param[in] ldb       Leading dimension of matrix \b B. It cannot be less
+ *                      than \b N when the \b order parameter is set to
+ *                      \b clblasRowMajor,\n or less than \b K
+ *                      when it is set to \b clblasColumnMajor.
+ * @param[in] beta      The factor of matrix \b C.
+ * @param[out] C        Buffer object storing matrix \b C.
+ * @param[in]  offC     Offset of the first element of the matrix \b C in the
+ *                      buffer object. Counted in elements.
+ * @param[in] ldc       Leading dimension of matrix \b C. It cannot be less
+ *                      than \b N when the \b order parameter is set to
+ *                      \b clblasRowMajor,\n or less than \b M when
+ *                      it is set to \b clblasColumnMajorOrder.
+ * @param[in] numCommandQueues    Number of OpenCL command queues in which the
+ *                                task is to be performed.
+ * @param[in] commandQueues       OpenCL command queues.
+ * @param[in] numEventsInWaitList Number of events in the event wait list.
+ * @param[in] eventWaitList       Event wait list.
+ * @param[in] events     Event objects per each command queue that identify
+ *                       a particular kernel execution instance.
+ * @param[in] batch     batch size
+ *
+ * @return
+ *   - \b clblasSuccess on success;
+ *   - \b clblasInvalidValue if either \b offA, \b offB or \b offC exceeds
+ *        the size of the respective buffer object;
+ *   - the same error codes as clblasSgemm() otherwise.
+ *
+ * @ingroup GEMM
+ */
+clblasStatus
+clblasSgemmBatch(
+    clblasOrder order,
+    clblasTranspose transA,
+    clblasTranspose transB,
+    size_t M,
+    size_t N,
+    size_t K,
+    cl_float alpha,
+    const cl_mem A,
+    size_t offA,
+    size_t lda,
+    const cl_mem B,
+    size_t offB,
+    size_t ldb,
+    cl_float beta,
+    cl_mem C,
+    size_t offC,
+    size_t ldc,
+    cl_uint numCommandQueues,
+    cl_command_queue *commandQueues,
+    cl_uint numEventsInWaitList,
+    const cl_event *eventWaitList,
+    cl_event *events,
+    size_t batch);
+
+
+
 /**
  * @example example_sgemm.c
  * This is an example of how to use the @ref clblasSgemmEx function.
@@ -7484,6 +7569,89 @@ clblasDgemm(
     cl_uint numEventsInWaitList,
     const cl_event *eventWaitList,
     cl_event *events);
+    
+/**
+ * @example example_sgemm.c
+ * This is an example of how to use the @ref clblasSgemmEx function.
+ */
+
+/**
+ * @brief Matrix-matrix product of general rectangular matrices with double
+ *        elements. Extended version.
+ *
+ * Matrix-matrix products:
+ *   - \f$ C \leftarrow \alpha A B + \beta C \f$
+ *   - \f$ C \leftarrow \alpha A^T B + \beta C \f$
+ *   - \f$ C \leftarrow \alpha A B^T + \beta C \f$
+ *   - \f$ C \leftarrow \alpha A^T B^T + \beta C \f$
+ *
+ * @param[in] order     Row/column order.
+ * @param[in] transA    How matrix \b A is to be transposed.
+ * @param[in] transB    How matrix \b B is to be transposed.
+ * @param[in] M         Number of rows in matrix \b A.
+ * @param[in] N         Number of columns in matrix \b B.
+ * @param[in] K         Number of columns in matrix \b A and rows in matrix \b B.
+ * @param[in] alpha     The factor of matrix \b A.
+ * @param[in] A         Buffer object storing matrix \b A.
+ * @param[in] offA      Offset of the first element of the matrix \b A in the
+ *                      buffer object. Counted in elements.
+ * @param[in] lda       Leading dimension of matrix \b A. For detailed description,
+ *                      see clblasSgemm().
+ * @param[in] B         Buffer object storing matrix \b B.
+ * @param[in] offB      Offset of the first element of the matrix \b B in the
+ *                      buffer object. Counted in elements.
+ * @param[in] ldb       Leading dimension of matrix \b B. For detailed description,
+ *                      see clblasSgemm().
+ * @param[in] beta      The factor of matrix \b C.
+ * @param[out] C        Buffer object storing matrix \b C.
+ * @param[in] offC      Offset of the first element of the matrix \b C in the
+ *                      buffer object. Counted in elements.
+ * @param[in] ldc       Leading dimension of matrix \b C. For detailed description,
+ *                      see clblasSgemm().
+ * @param[in] numCommandQueues    Number of OpenCL command queues in which the
+ *                                task is to be performed.
+ * @param[in] commandQueues       OpenCL command queues.
+ * @param[in] numEventsInWaitList Number of events in the event wait list.
+ * @param[in] eventWaitList       Event wait list.
+ * @param[in] events     Event objects per each command queue that identify
+ *                       a particular kernel execution instance.
+ * @param[in] batch     batch size
+ *
+ * @return
+ *   - \b clblasSuccess on success;
+ *   - \b clblasInvalidDevice if a target device does not support floating
+ *        point arithmetic with double precision;
+ *   - \b clblasInvalidValue if either \b offA, \b offB or offC exceeds
+ *        the size of the respective buffer object;
+ *   - the same error codes as the clblasSgemm() function otherwise.
+ *
+ * @ingroup GEMM
+ */
+clblasStatus
+clblasDgemmBatch(
+    clblasOrder order,
+    clblasTranspose transA,
+    clblasTranspose transB,
+    size_t M,
+    size_t N,
+    size_t K,
+    cl_double alpha,
+    const cl_mem A,
+    size_t offA,
+    size_t lda,
+    const cl_mem B,
+    size_t offB,
+    size_t ldb,
+    cl_double beta,
+    cl_mem C,
+    size_t offC,
+    size_t ldc,
+    cl_uint numCommandQueues,
+    cl_command_queue *commandQueues,
+    cl_uint numEventsInWaitList,
+    const cl_event *eventWaitList,
+    cl_event *events,
+    size_t batch);
 
 /**
  * @brief Matrix-matrix product of general rectangular matrices with float
@@ -7559,6 +7727,82 @@ clblasCgemm(
     const cl_event *eventWaitList,
     cl_event *events);
 
+
+/**
+ * @brief Matrix-matrix product of general rectangular matrices with float
+ *        complex elements. Extended version.
+ *
+ * Matrix-matrix products:
+ *   - \f$ C \leftarrow \alpha A B + \beta C \f$
+ *   - \f$ C \leftarrow \alpha A^T B + \beta C \f$
+ *   - \f$ C \leftarrow \alpha A B^T + \beta C \f$
+ *   - \f$ C \leftarrow \alpha A^T B^T + \beta C \f$
+ *
+ * @param[in] order     Row/column order.
+ * @param[in] transA    How matrix \b A is to be transposed.
+ * @param[in] transB    How matrix \b B is to be transposed.
+ * @param[in] M         Number of rows in matrix \b A.
+ * @param[in] N         Number of columns in matrix \b B.
+ * @param[in] K         Number of columns in matrix \b A and rows in matrix \b B.
+ * @param[in] alpha     The factor of matrix \b A.
+ * @param[in] A         Buffer object storing matrix \b A.
+ * @param[in] offA      Offset of the first element of the matrix \b A in the
+ *                      buffer object. Counted in elements.
+ * @param[in] lda       Leading dimension of matrix \b A. For detailed description,
+ *                      see clblasSgemm().
+ * @param[in] B         Buffer object storing matrix \b B.
+ * @param[in] offB      Offset of the first element of the matrix \b B in the
+ *                      buffer object. Counted in elements.
+ * @param[in] ldb       Leading dimension of matrix \b B. For detailed description,
+ *                      see clblasSgemm().
+ * @param[in] beta      The factor of matrix \b C.
+ * @param[out] C        Buffer object storing matrix \b C.
+ * @param[in] offC      Offset of the first element of the matrix \b C in the
+ *                      buffer object. Counted in elements.
+ * @param[in] ldc       Leading dimension of matrix \b C. For detailed description,
+ *                      see clblasSgemm().
+ * @param[in] numCommandQueues    Number of OpenCL command queues in which the
+ *                                task is to be performed.
+ * @param[in] commandQueues       OpenCL command queues.
+ * @param[in] numEventsInWaitList Number of events in the event wait list.
+ * @param[in] eventWaitList       Event wait list.
+ * @param[in] events     Event objects per each command queue that identify
+ *                       a particular kernel execution instance.
+ * @param[in] batch     batch size
+ *
+ * @return
+ *   - \b clblasSuccess on success;
+ *   - \b clblasInvalidValue if either \b offA, \b offB or offC exceeds
+ *        the size of the respective buffer object;
+ *   - the same error codes as the clblasSgemm() function otherwise.
+ *
+ * @ingroup GEMM
+ */
+clblasStatus
+clblasCgemmBatch(
+    clblasOrder order,
+    clblasTranspose transA,
+    clblasTranspose transB,
+    size_t M,
+    size_t N,
+    size_t K,
+    FloatComplex alpha,
+    const cl_mem A,
+    size_t offA,
+    size_t lda,
+    const cl_mem B,
+    size_t offB,
+    size_t ldb,
+    FloatComplex beta,
+    cl_mem C,
+    size_t offC,
+    size_t ldc,
+    cl_uint numCommandQueues,
+    cl_command_queue *commandQueues,
+    cl_uint numEventsInWaitList,
+    const cl_event *eventWaitList,
+    cl_event *events,
+    size_t batch);
 /**
  * @brief Matrix-matrix product of general rectangular matrices with double
  *        complex elements. Exteneded version.

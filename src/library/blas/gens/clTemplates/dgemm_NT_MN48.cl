@@ -24,6 +24,11 @@ __kernel void dgemm(__global double * C,
                     uint offsetB,
                     uint offsetA)
 {
+
+      A += (get_global_id(2) * M*K);
+      B += (get_global_id(2) * K*N);
+      C += (get_global_id(2) * M*N);
+      
     GPtr uA, uB;
     uA.d2v = (__global double2 *)A;
     uB.d2v = (__global double2 *)B;

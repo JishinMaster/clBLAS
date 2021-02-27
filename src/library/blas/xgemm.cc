@@ -336,6 +336,335 @@ template<> clblasTranspose correctTranspose<DoubleComplex>( clblasTranspose tran
 
 
 /******************************************************************************
+ * templated Gemm Batch
+ *****************************************************************************/
+template<typename Precision>
+clblasStatus
+clblasGemmBatch(
+    clblasOrder order,
+    clblasTranspose transA,
+    clblasTranspose transB,
+    size_t iM, size_t iN, size_t iK,
+    Precision alpha,
+    const cl_mem iA, size_t iOffA, size_t iLda,
+    const cl_mem iB, size_t iOffB, size_t iLdb,
+    Precision beta,
+    cl_mem C, size_t iOffC,  size_t iLdc,
+    cl_uint numCommandQueues,
+    cl_command_queue *commandQueues,
+    cl_uint numEventsInWaitList,
+    const cl_event *eventWaitList,
+    cl_event *events,
+    size_t batch)
+{
+    
+  // cast types to opencl types
+  cl_mem A = iA;
+  cl_mem B = iB;
+  cl_uint M = static_cast<cl_uint>( iM );
+  cl_uint N = static_cast<cl_uint>( iN );
+  cl_uint K = static_cast<cl_uint>( iK );
+  cl_uint offA = static_cast<cl_uint>( iOffA );
+  cl_uint offB = static_cast<cl_uint>( iOffB );
+  cl_uint offC = static_cast<cl_uint>( iOffC );
+  cl_uint lda = static_cast<cl_uint>( iLda );
+  cl_uint ldb = static_cast<cl_uint>( iLdb );
+  cl_uint ldc = static_cast<cl_uint>( iLdc );
+  cl_uint lbatch = static_cast<cl_uint>( batch );
+
+  transA = correctTranspose<Precision>(transA);
+  transB = correctTranspose<Precision>(transB);
+  // if debug build, validate input
+  // CHECK_QUEUES(numCommandQueues, commandQueues);
+  // CHECK_EVENTS(numEventsInWaitList, eventWaitList);
+  // CHECK_MATRIX_A(Precision, order, transA, A, M, K, offA, lda);
+  // CHECK_MATRIX_B(Precision, order, transB, B, K, N, offB, ldb);
+  // CHECK_MATRIX_C(Precision, order, clblasNoTrans, C, M, N, offC, ldc);
+  force_gemm_column_major( order, transA, transB,
+    M, N, offA, offB, lda, ldb, A, B );
+
+
+
+/******************************************************************************
+ * Handle Special Cases
+ *
+ * 1) sgemm NT where lda, ldb are big multiples of 1024 starting from 4096
+ *
+ * 2) sgemm NT where M and N are within middle range
+ * and are mod32 but not mod96 or mod64
+ *
+ *****************************************************************************/
+
+  bool specialCaseHandled = false;
+
+  clblasStatus SpecialCaseStatus = GemmSpecialCasesBatch<Precision>(order,
+	  transA,
+	  transB,
+	  M, N, K,
+	  alpha,
+	  A, offA, lda,
+	  B, offB, ldb,
+	  beta,
+	  C, offC, ldc,
+	  numCommandQueues,
+	  commandQueues,
+	  numEventsInWaitList,
+	  eventWaitList,
+	  events,
+	  specialCaseHandled,
+	  lbatch);
+
+  if (specialCaseHandled)
+	  return SpecialCaseStatus;
+
+
+/******************************************************************************
+ * Optimal num elements per thread
+ *****************************************************************************/
+  cl_int err;
+  cl_device_id clDevice;
+  err = clGetCommandQueueInfo( commandQueues[0], CL_QUEUE_DEVICE, sizeof(clDevice), &clDevice, NULL);
+  //CL_CHECK(err)
+  returnIfErr(err);
+
+  cl_uint clDeviceNumCUs;
+  err = clGetDeviceInfo( clDevice, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(clDeviceNumCUs), &clDeviceNumCUs, NULL);
+  //CL_CHECK(err)
+  returnIfErr(err);
+  unsigned int deviceIdealNumThreads = (8 /*waves per CU*/)*(64 /*threads per wave*/)*clDeviceNumCUs;
+  float optimalNumElementsPerThread = ((float)M*N) / deviceIdealNumThreads;
+  //optimalNumElementsPerThread = 32;
+  bool betaNonZero = !isZero(beta);
+
+#ifdef AUTOGEMM_PRINT_DEBUG
+  printf("%sgemm_%3s_%s%s_B%u_%llux%llux%llu\n",
+      getPrecision<Precision>(),
+      order==clblasColumnMajor ? "Col" : "Row",
+      transA==clblasNoTrans ? "N" : transA==clblasTrans ? "T" : "C",
+      transB==clblasNoTrans ? "N" : transB==clblasTrans ? "T" : "C",
+      betaNonZero ? 1 : 0,
+      iM, iN, iK );
+#endif
+
+/******************************************************************************
+ * Select kernel
+ *****************************************************************************/
+  const char *tileKernelSource   = NULL;
+  const char *rowKernelSource    = NULL;
+  const char *colKernelSource    = NULL;
+  const char *cornerKernelSource = NULL;
+  const char *sourceBuildOptions = NULL;
+  const unsigned char *tileKernelBinary   = NULL;
+  const unsigned char *rowKernelBinary    = NULL;
+  const unsigned char *colKernelBinary    = NULL;
+  const unsigned char *cornerKernelBinary = NULL;
+  size_t *tileKernelBinarySize   = 0;
+  size_t *rowKernelBinarySize    = 0;
+  size_t *colKernelBinarySize    = 0;
+  size_t *cornerKernelBinarySize = 0;
+  const char *binaryBuildOptions = NULL;
+  cl_kernel  *tileClKernelDummy       = NULL; // no longer used; broke thread safety
+  cl_kernel  *rowClKernelDummy        = NULL; // no longer used; broke thread safety
+  cl_kernel  *colClKernelDummy        = NULL; // no longer used; broke thread safety
+  cl_kernel  *cornerClKernelDummy     = NULL; // no longer used; broke thread safety
+  unsigned int workGroupNumRows;
+  unsigned int workGroupNumCols;
+  unsigned int microTileNumRows;
+  unsigned int microTileNumCols;
+  unsigned int unroll;
+  gemmSelectKernel<Precision>(
+    order, transA, transB,
+    iM, iN, iK,
+    betaNonZero,
+    optimalNumElementsPerThread,
+    &tileKernelSource,
+    &rowKernelSource,
+    &colKernelSource,
+    &cornerKernelSource,
+    &sourceBuildOptions,
+    &tileKernelBinary,
+    &rowKernelBinary,
+    &colKernelBinary,
+    &cornerKernelBinary,
+    &tileKernelBinarySize,
+    &rowKernelBinarySize,
+    &colKernelBinarySize,
+    &cornerKernelBinarySize,
+    &binaryBuildOptions,
+    &tileClKernelDummy,
+    &rowClKernelDummy,
+    &colClKernelDummy,
+    &cornerClKernelDummy,
+    &workGroupNumRows,
+    &workGroupNumCols,
+    &microTileNumRows,
+    &microTileNumCols,
+    &unroll);
+  // make sure gemmSelectKernel found a valid kernel
+  if (!tileKernelSource) {
+    printf("ERROR: gemmSelectKernel() couldn't find kernel(s) for { order=%s, transA=%s, transB=%s, M=%u, N=%u, K=%u, beta=%u, onept=%f }\n",
+      order==clblasColumnMajor ? "ColMajor" : "RowMajor",
+      transA==clblasNoTrans ? "N" : transA==clblasTrans ? "T" : "C",
+      transB==clblasNoTrans ? "N" : transB==clblasTrans ? "T" : "C",
+      M, N, K,
+      betaNonZero ? 1 : 0,
+      optimalNumElementsPerThread );
+      gemmSelectKernel<Precision>(
+          order,
+          transA,
+          transB,
+          M,
+          N,
+          K,
+          betaNonZero,
+          optimalNumElementsPerThread,
+          &tileKernelSource,
+          &rowKernelSource,
+          &colKernelSource,
+          &cornerKernelSource,
+          &sourceBuildOptions,
+          &tileKernelBinary,
+          &rowKernelBinary,
+          &colKernelBinary,
+          &cornerKernelBinary,
+          &tileKernelBinarySize,
+          &rowKernelBinarySize,
+          &colKernelBinarySize,
+          &cornerKernelBinarySize,
+          &binaryBuildOptions,
+          &tileClKernelDummy,
+          &rowClKernelDummy,
+          &colClKernelDummy,
+          &cornerClKernelDummy,
+          &workGroupNumRows,
+          &workGroupNumCols,
+          &microTileNumRows,
+          &microTileNumCols,
+          &unroll);
+    return clblasNotImplemented;
+  }
+
+
+  unsigned int macroTileNumRows = workGroupNumRows*microTileNumRows;
+  unsigned int macroTileNumCols = workGroupNumCols*microTileNumCols;
+  bool needTileKernel = M/macroTileNumRows > 0
+    && N/macroTileNumCols > 0;
+  bool needRowKernel = M%macroTileNumRows > 0 && N/macroTileNumCols > 0;
+  bool needColKernel = N%macroTileNumCols > 0 && M/macroTileNumRows > 0;
+  bool needCornerKernel = M%macroTileNumRows > 0 && N%macroTileNumCols > 0;
+#if 0
+  printf("For M,N,K = %u,%u,%u and %u CUs selected tile is wg=%ux%u, microTile=%ux%u, macroTile=%ux%u kernelsNeeded=%u,%u,%u,%u\n",
+    M, N, K, clDeviceNumCUs,
+    workGroupNumRows, workGroupNumCols,
+    microTileNumRows, microTileNumCols,
+    macroTileNumRows, macroTileNumCols,
+    needTileKernel ? 1 : 0,
+    needRowKernel ? 1 : 0,
+    needColKernel ? 1 : 0,
+    needCornerKernel ? 1 : 0
+    );
+#endif
+
+/******************************************************************************
+ * Build kernels
+ *****************************************************************************/
+
+  cl_kernel  tileClKernel       = NULL;
+  cl_kernel  rowClKernel        = NULL;
+  cl_kernel  colClKernel        = NULL;
+  cl_kernel  cornerClKernel     = NULL;
+  if (needTileKernel)   makeGemmKernel(  &tileClKernel, commandQueues[0],   tileKernelSource, sourceBuildOptions,   &tileKernelBinary,   tileKernelBinarySize, binaryBuildOptions);
+  if (needRowKernel)    makeGemmKernel(   &rowClKernel, commandQueues[0],    rowKernelSource, sourceBuildOptions,    &rowKernelBinary,    rowKernelBinarySize, binaryBuildOptions);
+  if (needColKernel)    makeGemmKernel(   &colClKernel, commandQueues[0],    colKernelSource, sourceBuildOptions,    &colKernelBinary,    colKernelBinarySize, binaryBuildOptions);
+  if (needCornerKernel) makeGemmKernel(&cornerClKernel, commandQueues[0], cornerKernelSource, sourceBuildOptions, &cornerKernelBinary, cornerKernelBinarySize, binaryBuildOptions);
+  const size_t localWorkSize[3] = { workGroupNumRows, workGroupNumCols, 1 };
+  unsigned int numKernelsEnqueued = 0;
+
+/******************************************************************************
+ * Gather kernel arguments
+ *****************************************************************************/
+  gemmKernelArgs[ 0] = &A;     gemmKernelArgSizes[ 0] = sizeof(cl_mem);
+  gemmKernelArgs[ 1] = &B;     gemmKernelArgSizes[ 1] = sizeof(cl_mem);
+  gemmKernelArgs[ 2] = &C;     gemmKernelArgSizes[ 2] = sizeof(cl_mem);
+  gemmKernelArgs[ 3] = &alpha; gemmKernelArgSizes[ 3] = sizeof(Precision);
+  gemmKernelArgs[ 4] = &beta;  gemmKernelArgSizes[ 4] = sizeof(Precision);
+  gemmKernelArgs[ 5] = &M;     gemmKernelArgSizes[ 5] = sizeof(cl_uint);
+  gemmKernelArgs[ 6] = &N;     gemmKernelArgSizes[ 6] = sizeof(cl_uint);
+  gemmKernelArgs[ 7] = &K;     gemmKernelArgSizes[ 7] = sizeof(cl_uint);
+  gemmKernelArgs[ 8] = &lda;   gemmKernelArgSizes[ 8] = sizeof(cl_uint);
+  gemmKernelArgs[ 9] = &ldb;   gemmKernelArgSizes[ 9] = sizeof(cl_uint);
+  gemmKernelArgs[10] = &ldc;   gemmKernelArgSizes[10] = sizeof(cl_uint);
+  gemmKernelArgs[11] = &offA;  gemmKernelArgSizes[11] = sizeof(cl_uint);
+  gemmKernelArgs[12] = &offB;  gemmKernelArgSizes[12] = sizeof(cl_uint);
+  gemmKernelArgs[13] = &offC;  gemmKernelArgSizes[13] = sizeof(cl_uint);
+  //gemmKernelArgs[14] = &lbatch;  gemmKernelArgSizes[14] = sizeof(cl_uint);
+
+
+/******************************************************************************
+ * Enqueue Tile kernel
+ *****************************************************************************/
+  if (needTileKernel) {
+    //printf("enqueueing tile kernel\n");
+    size_t globalWorkSize[3] = {(M/macroTileNumRows)*workGroupNumRows, (N/macroTileNumCols)*workGroupNumCols, lbatch };
+    err = enqueueGemmKernel( commandQueues[numKernelsEnqueued%numCommandQueues], tileClKernel,
+      gemmKernelArgs, gemmKernelArgSizes, numGemmKernelArgs,
+      globalWorkSize, localWorkSize,
+      numEventsInWaitList, eventWaitList,
+      &events[numKernelsEnqueued%numCommandQueues] );
+	returnIfErr(err);
+    numKernelsEnqueued++;
+  }
+
+/******************************************************************************
+ * Enqueue Row kernel
+ *****************************************************************************/
+  if (needRowKernel) {
+    //printf("enqueueing row kernel\n");
+    size_t globalWorkSize[3] = {1*workGroupNumRows, (N/macroTileNumCols)*workGroupNumCols, lbatch };
+    err = enqueueGemmKernel( commandQueues[numKernelsEnqueued%numCommandQueues], rowClKernel,
+      gemmKernelArgs, gemmKernelArgSizes, numGemmKernelArgs,
+      globalWorkSize, localWorkSize,
+      numEventsInWaitList, eventWaitList,
+      &events[numKernelsEnqueued%numCommandQueues] );
+	returnIfErr(err);
+    numKernelsEnqueued++;
+  }
+
+/******************************************************************************
+ * Enqueue Col kernel
+ *****************************************************************************/
+  if (needColKernel) {
+    //printf("enqueueing col kernel\n");
+    size_t globalWorkSize[3] = { (M/macroTileNumRows)*workGroupNumRows, 1*workGroupNumCols, lbatch };
+    err = enqueueGemmKernel( commandQueues[numKernelsEnqueued%numCommandQueues], colClKernel,
+      gemmKernelArgs, gemmKernelArgSizes, numGemmKernelArgs,
+      globalWorkSize, localWorkSize,
+      numEventsInWaitList, eventWaitList,
+      &events[numKernelsEnqueued%numCommandQueues] );
+	returnIfErr(err);
+    numKernelsEnqueued++;
+  }
+
+/******************************************************************************
+ * Enqueue Corner kernel
+ *****************************************************************************/
+  if (needCornerKernel) {
+    //printf("enqueueing corner kernel\n");
+    size_t globalWorkSize[3] = { 1*workGroupNumRows, 1*workGroupNumCols, lbatch};
+    err = enqueueGemmKernel( commandQueues[numKernelsEnqueued%numCommandQueues], cornerClKernel,
+      gemmKernelArgs, gemmKernelArgSizes, numGemmKernelArgs,
+      globalWorkSize, localWorkSize,
+      numEventsInWaitList, eventWaitList,
+      &events[numKernelsEnqueued%numCommandQueues] );
+	returnIfErr(err);
+    numKernelsEnqueued++;
+  }
+
+  return clblasSuccess;
+}
+
+
+/******************************************************************************
  * templated Gemm
  *****************************************************************************/
 template<typename Precision>
@@ -575,12 +904,14 @@ clblasGemm(
   if (needRowKernel)    makeGemmKernel(   &rowClKernel, commandQueues[0],    rowKernelSource, sourceBuildOptions,    &rowKernelBinary,    rowKernelBinarySize, binaryBuildOptions);
   if (needColKernel)    makeGemmKernel(   &colClKernel, commandQueues[0],    colKernelSource, sourceBuildOptions,    &colKernelBinary,    colKernelBinarySize, binaryBuildOptions);
   if (needCornerKernel) makeGemmKernel(&cornerClKernel, commandQueues[0], cornerKernelSource, sourceBuildOptions, &cornerKernelBinary, cornerKernelBinarySize, binaryBuildOptions);
-  const size_t localWorkSize[2] = { workGroupNumRows, workGroupNumCols };
+  const size_t localWorkSize[3] = { workGroupNumRows, workGroupNumCols, 1 };
   unsigned int numKernelsEnqueued = 0;
 
 /******************************************************************************
  * Gather kernel arguments
  *****************************************************************************/
+ 
+  cl_uint batch = 1;
   gemmKernelArgs[ 0] = &A;     gemmKernelArgSizes[ 0] = sizeof(cl_mem);
   gemmKernelArgs[ 1] = &B;     gemmKernelArgSizes[ 1] = sizeof(cl_mem);
   gemmKernelArgs[ 2] = &C;     gemmKernelArgSizes[ 2] = sizeof(cl_mem);
@@ -595,6 +926,7 @@ clblasGemm(
   gemmKernelArgs[11] = &offA;  gemmKernelArgSizes[11] = sizeof(cl_uint);
   gemmKernelArgs[12] = &offB;  gemmKernelArgSizes[12] = sizeof(cl_uint);
   gemmKernelArgs[13] = &offC;  gemmKernelArgSizes[13] = sizeof(cl_uint);
+  //gemmKernelArgs[14] = &batch;  gemmKernelArgSizes[14] = sizeof(cl_uint);
 
 
 /******************************************************************************
@@ -602,7 +934,7 @@ clblasGemm(
  *****************************************************************************/
   if (needTileKernel) {
     //printf("enqueueing tile kernel\n");
-    size_t globalWorkSize[2] = {(M/macroTileNumRows)*workGroupNumRows, (N/macroTileNumCols)*workGroupNumCols };
+    size_t globalWorkSize[3] = {(M/macroTileNumRows)*workGroupNumRows, (N/macroTileNumCols)*workGroupNumCols, 1 };
     err = enqueueGemmKernel( commandQueues[numKernelsEnqueued%numCommandQueues], tileClKernel,
       gemmKernelArgs, gemmKernelArgSizes, numGemmKernelArgs,
       globalWorkSize, localWorkSize,
@@ -617,7 +949,7 @@ clblasGemm(
  *****************************************************************************/
   if (needRowKernel) {
     //printf("enqueueing row kernel\n");
-    size_t globalWorkSize[2] = {1*workGroupNumRows, (N/macroTileNumCols)*workGroupNumCols };
+    size_t globalWorkSize[3] = {1*workGroupNumRows, (N/macroTileNumCols)*workGroupNumCols, 1 };
     err = enqueueGemmKernel( commandQueues[numKernelsEnqueued%numCommandQueues], rowClKernel,
       gemmKernelArgs, gemmKernelArgSizes, numGemmKernelArgs,
       globalWorkSize, localWorkSize,
@@ -632,7 +964,7 @@ clblasGemm(
  *****************************************************************************/
   if (needColKernel) {
     //printf("enqueueing col kernel\n");
-    size_t globalWorkSize[2] = { (M/macroTileNumRows)*workGroupNumRows, 1*workGroupNumCols };
+    size_t globalWorkSize[3] = { (M/macroTileNumRows)*workGroupNumRows, 1*workGroupNumCols, 1 };
     err = enqueueGemmKernel( commandQueues[numKernelsEnqueued%numCommandQueues], colClKernel,
       gemmKernelArgs, gemmKernelArgSizes, numGemmKernelArgs,
       globalWorkSize, localWorkSize,
@@ -647,7 +979,7 @@ clblasGemm(
  *****************************************************************************/
   if (needCornerKernel) {
     //printf("enqueueing corner kernel\n");
-    size_t globalWorkSize[2] = { 1*workGroupNumRows, 1*workGroupNumCols };
+    size_t globalWorkSize[3] = { 1*workGroupNumRows, 1*workGroupNumCols, 1 };
     err = enqueueGemmKernel( commandQueues[numKernelsEnqueued%numCommandQueues], cornerClKernel,
       gemmKernelArgs, gemmKernelArgSizes, numGemmKernelArgs,
       globalWorkSize, localWorkSize,
@@ -658,6 +990,70 @@ clblasGemm(
   }
 
   return clblasSuccess;
+}
+
+
+/******************************************************************************
+ * SGEMM API call
+ *****************************************************************************/
+extern "C"
+clblasStatus
+clblasSgemmBatch(
+    clblasOrder order,
+    clblasTranspose transA,
+    clblasTranspose transB,
+    size_t M, size_t N, size_t K,
+    cl_float alpha,
+    const cl_mem A, size_t offA, size_t lda,
+    const cl_mem B, size_t offB, size_t ldb,
+    cl_float beta,
+    cl_mem C, size_t offC,  size_t ldc,
+    cl_uint numCommandQueues,
+    cl_command_queue *commandQueues,
+    cl_uint numEventsInWaitList,
+    const cl_event *eventWaitList,
+    cl_event *events,
+    size_t batch)
+{
+  // check if memory objects are valid
+  clblasStatus clblasErr = clblasSuccess;
+  clblasErr = checkMemObjects(A, B, C, true, A_MAT_ERRSET, B_MAT_ERRSET, C_MAT_ERRSET);
+  if (clblasErr != clblasSuccess)
+  	  return clblasErr;
+
+  if (K != 0)
+  {
+  	//check matrix A
+  	clblasErr = checkMatrixSizes(TYPE_FLOAT, order, transA, M, K, A, offA, lda, A_MAT_ERRSET);
+  	if (clblasErr != clblasSuccess)
+  		return clblasErr;
+
+  	//check matrix B
+	clblasErr = checkMatrixSizes(TYPE_FLOAT, order, transB, K, N, B, offB, ldb, B_MAT_ERRSET);
+	if (clblasErr != clblasSuccess)
+		return clblasErr;
+  }
+  //check matrix C
+  clblasErr = checkMatrixSizes(TYPE_FLOAT, order, clblasNoTrans, M, N, C, offC, ldc, C_MAT_ERRSET);
+  if (clblasErr != clblasSuccess)
+      return clblasErr;
+
+  return clblasGemmBatch(
+       order,
+       transA,
+       transB,
+       M, N, K,
+       alpha,
+       A, offA, lda,
+       B, offB, ldb,
+       beta,
+       C, offC, ldc,
+       numCommandQueues,
+       commandQueues,
+       numEventsInWaitList,
+       eventWaitList,
+       events,
+       batch);
 }
 
 
@@ -841,6 +1237,69 @@ clblasCgemm(
        numEventsInWaitList,
        eventWaitList,
        events);
+}
+
+/******************************************************************************
+ * CGEMM BATCH API call
+ *****************************************************************************/
+extern "C"
+clblasStatus
+clblasCgemmBatch(
+    clblasOrder order,
+    clblasTranspose transA,
+    clblasTranspose transB,
+    size_t M, size_t N, size_t K,
+    FloatComplex alpha,
+    const cl_mem A, size_t offA, size_t lda,
+    const cl_mem B, size_t offB, size_t ldb,
+    FloatComplex beta,
+    cl_mem C, size_t offC, size_t ldc,
+    cl_uint numCommandQueues,
+    cl_command_queue *commandQueues,
+    cl_uint numEventsInWaitList,
+    const cl_event *eventWaitList,
+    cl_event *events,
+    size_t batch)
+{
+  // check if memory objects are valid
+  clblasStatus clblasErr = clblasSuccess;
+  clblasErr = checkMemObjects(A, B, C, true, A_MAT_ERRSET, B_MAT_ERRSET, C_MAT_ERRSET);
+  if (clblasErr != clblasSuccess)
+  	return clblasErr;
+
+  if (K != 0)
+  {
+  	//check matrix A
+  	clblasErr = checkMatrixSizes(TYPE_COMPLEX_FLOAT, order, transA, M, K, A, offA, lda, A_MAT_ERRSET);
+  	if (clblasErr != clblasSuccess)
+  		return clblasErr;
+
+  	//check matrix B
+  	clblasErr = checkMatrixSizes(TYPE_COMPLEX_FLOAT, order, transB, K, N, B, offB, ldb, B_MAT_ERRSET);
+  	if (clblasErr != clblasSuccess)
+  		return clblasErr;
+  }
+  //check matrix C
+  clblasErr = checkMatrixSizes(TYPE_COMPLEX_FLOAT, order, clblasNoTrans, M, N, C, offC, ldc, C_MAT_ERRSET);
+  if (clblasErr != clblasSuccess)
+  	  return clblasErr;
+
+   return clblasGemmBatch(
+       order,
+       transA,
+       transB,
+       M, N, K,
+       alpha,
+       A, offA, lda,
+       B, offB, ldb,
+       beta,
+       C, offC, ldc,
+       numCommandQueues,
+       commandQueues,
+       numEventsInWaitList,
+       eventWaitList,
+       events,
+       batch);
 }
 
 /******************************************************************************

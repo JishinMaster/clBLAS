@@ -992,3 +992,96 @@ bool &specialCaseHandled)
 {
 	return clblasNotImplemented;
 }
+
+
+
+
+////// Batch
+
+template<>
+clblasStatus
+GemmSpecialCasesBatch<float>(clblasOrder order,
+clblasTranspose transA,
+clblasTranspose transB,
+cl_uint M, cl_uint N, cl_uint K,
+float alpha,
+cl_mem A, cl_uint offA, cl_uint lda,
+cl_mem B, cl_uint offB, cl_uint ldb,
+float beta,
+cl_mem C, cl_uint offC, cl_uint ldc,
+cl_uint numCommandQueues,
+cl_command_queue *commandQueues,
+cl_uint numEventsInWaitList,
+const cl_event *eventWaitList,
+cl_event *events,
+bool &specialCaseHandled,
+cl_uint lbatch)
+{
+	return clblasNotImplemented;
+}
+
+template<>
+clblasStatus
+GemmSpecialCasesBatch<double>(clblasOrder order,
+clblasTranspose transA,
+clblasTranspose transB,
+cl_uint M, cl_uint N, cl_uint K,
+double alpha,
+cl_mem A, cl_uint offA, cl_uint lda,
+cl_mem B, cl_uint offB, cl_uint ldb,
+double beta,
+cl_mem C, cl_uint offC, cl_uint ldc,
+cl_uint numCommandQueues,
+cl_command_queue *commandQueues,
+cl_uint numEventsInWaitList,
+const cl_event *eventWaitList,
+cl_event *events,
+bool &specialCaseHandled,
+cl_uint lbatch)
+{
+	return clblasNotImplemented;
+}
+
+template<>
+clblasStatus
+GemmSpecialCasesBatch<FloatComplex>(clblasOrder order,
+clblasTranspose transA,
+clblasTranspose transB,
+cl_uint M, cl_uint N, cl_uint K,
+FloatComplex alpha,
+cl_mem A, cl_uint offA, cl_uint lda,
+cl_mem B, cl_uint offB, cl_uint ldb,
+FloatComplex beta,
+cl_mem C, cl_uint offC, cl_uint ldc,
+cl_uint numCommandQueues,
+cl_command_queue *commandQueues,
+cl_uint numEventsInWaitList,
+const cl_event *eventWaitList,
+cl_event *events,
+bool &specialCaseHandled,
+cl_uint lbatch)
+{
+	return clblasNotImplemented;
+}
+
+template<>
+clblasStatus
+GemmSpecialCasesBatch<DoubleComplex>(clblasOrder order,
+clblasTranspose transA,
+clblasTranspose transB,
+cl_uint M, cl_uint N, cl_uint K,
+DoubleComplex alpha,
+cl_mem A, cl_uint offA, cl_uint lda,
+cl_mem B, cl_uint offB, cl_uint ldb,
+DoubleComplex beta,
+cl_mem C, cl_uint offC, cl_uint ldc,
+cl_uint numCommandQueues,
+cl_command_queue *commandQueues,
+cl_uint numEventsInWaitList,
+const cl_event *eventWaitList,
+cl_event *events,
+bool &specialCaseHandled,
+cl_uint lbatch)
+{
+	return clblasNotImplemented;
+}

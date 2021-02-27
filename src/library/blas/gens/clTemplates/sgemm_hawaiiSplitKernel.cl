@@ -69,6 +69,11 @@ __kernel void sgemm_NT_96_96_16_16x16_6x6__ALPHABETA_SPLIT_MAIN( __global float 
   uint offsetB,
   uint offsetC)
 {
+
+      A += (get_global_id(2) * M*K);
+      B += (get_global_id(2) * K*N);
+      C += (get_global_id(2) * M*N);
+      
     float rC[6][6]  = {(float)0};
     float rA[1][6];
     float rB[1][6];

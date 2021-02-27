@@ -100,6 +100,11 @@ __kernel void sgemm_NT_128_128_16_16x16_8x8__ALPHABETA( __global float const * r
   uint offsetB,
   uint offsetC)
  {
+ 
+       A += (get_global_id(2) * M*K);
+      B += (get_global_id(2) * K*N);
+      C += (get_global_id(2) * M*N);
+      
      float rC[8][8]  = {(float)0};
     float rA[1][8];
     float rB[1][8];

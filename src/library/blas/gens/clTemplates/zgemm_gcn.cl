@@ -202,13 +202,15 @@ __kernel void KERNEL_NAME(DATA_TYPE_CHAR,TRANSPOSE_A,TRANSPOSE_B,MACRO_TILE_NUM_
   uint const ldc,
   uint const offsetA,
   uint const offsetB,
-  uint const offsetC )
+  uint const offsetC)
 {
   // apply offsets
   A += offsetA;
+  A += (get_global_id(2) * M*K);
   B += offsetB;
+  B += (get_global_id(2) * K*N);
   C += offsetC;
-
+  C += (get_global_id(2) * M*N);
   // registers
   DATA_TYPE_STR rC[MICRO_TILE_NUM_ROWS][MICRO_TILE_NUM_COLS]  = { {0} };
   DATA_TYPE_STR rA[MICRO_TILE_NUM_ROWS];

@@ -70,6 +70,11 @@ __attribute__((reqd_work_group_size(8,8,1)))
   uint const offsetB,
   uint const offsetC)
 {
+
+      A += (get_global_id(2) * M*K);
+      B += (get_global_id(2) * K*N);
+      C += (get_global_id(2) * M*N);
+      
   double rC[3][3]  = {(double)0};
   double rA[1][3];
   double rB[1][3];

@@ -78,6 +78,11 @@ __kernel void dgemm_NT_48_48_8_8x8_6x6__ALPHABETA_SPLIT_MAIN(__global double2 co
                                        uint offsetB,
                                        uint offsetC)
 {
+
+      A += (get_global_id(2) * M*K);
+      B += (get_global_id(2) * K*N);
+      C += (get_global_id(2) * M*N);
+      
     GPtr uA, uB;
     uA.d2v = (__global double2 *)A;
     uB.d2v = (__global double2 *)B;

@@ -39,4 +39,22 @@ GemmSpecialCases(clblasOrder order,
 				 cl_event *events,
                  bool &specialCaseHandled);
 
+template<typename Precision>
+clblasStatus
+GemmSpecialCasesBatch(clblasOrder order,
+                 clblasTranspose transA,
+				 clblasTranspose transB,
+				 cl_uint M, cl_uint N, cl_uint K,
+				 Precision alpha,
+				 cl_mem A, cl_uint offA, cl_uint lda,
+				 cl_mem B, cl_uint offB, cl_uint ldb,
+				 Precision beta,
+				 cl_mem C, cl_uint offC, cl_uint ldc,
+				 cl_uint numCommandQueues,
+				 cl_command_queue *commandQueues,
+                 cl_uint numEventsInWaitList,
+				 const cl_event *eventWaitList,
+				 cl_event *events,
+                 bool &specialCaseHandled,
+                 cl_uint lbatch);
 #endif
